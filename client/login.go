@@ -112,7 +112,7 @@ func (c *GogClient) Login(loginURL string, username string, password string, hea
 		return err
 	}
 
-	token, refreshToken, expiresAt, err := c.exchangeCodeForToken(code)
+	token, refreshToken, expiresAt, err := c.ExchangeCodeForToken(code)
 	if err != nil {
 		return fmt.Errorf("failed to exchange authorization code for token: %w", err)
 	}
@@ -208,7 +208,9 @@ func extractAuthCode(authURL string) (string, error) {
 	return code, nil
 }
 
-func (c *GogClient) exchangeCodeForToken(code string) (string, string, string, error) {
+// ExchangeCodeForToken exchanges an OAuth authorization code for access and refresh tokens.
+// Returns accessToken, refreshToken, expiresAt (RFC3339 format), and error.
+func (c *GogClient) ExchangeCodeForToken(code string) (string, string, string, error) {
 	query := url.Values{
 		"client_id":     {"46899977096215655"},
 		"client_secret": {"9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9"},

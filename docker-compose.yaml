@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gogg
+      POSTGRES_PASSWORD: gogg
+      POSTGRES_DB: gogg
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gogg"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://gogg:gogg@postgres:5432/gogg?sslmode=disable"
+      JWT_SECRET: "dev-secret-change-in-production"
+      GOGG_DOWNLOAD_PATH: "/downloads/shared"
+      ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      DEBUG: "true"
+    volumes:
+      - downloads:/downloads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Frontend development server (optional - run separately for hot reload)
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile.dev
+  #   ports:
+  #     - "5173:5173"
+  #   volumes:
+  #     - ./frontend:/app
+  #     - /app/node_modules
+  #   environment:
+  #     VITE_API_URL: "http://localhost:8080"
+
+volumes:
+  postgres_data:
+  downloads:
