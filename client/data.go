@@ -67,24 +67,93 @@ type Downloadable struct {
 // UnmarshalJSON is a custom unmarshal function for Game to process downloads and DLCs correctly.
 func (gd *Game) UnmarshalJSON(data []byte) error {
 	type Alias Game
-	// Unmarshal into a temporary value to avoid aliasing into a possibly nil receiver
-	var tmp struct {
-		RawDownloads [][]interface{} `json:"downloads"`
-		Alias
+	// First, try to unmarshal into a flexible structure that handles API variations
+	var raw struct {
+		Title           string          `json:"title"`
+		BackgroundImage *string         `json:"backgroundImage,omitempty"`
+		RawDownloads    json.RawMessage `json:"downloads"`
+		Extras          []Extra         `json:"extras"`
+		DLCs            []struct {
+			Title           string          `json:"title"`
+			BackgroundImage *string         `json:"backgroundImage,omitempty"`
+			RawDownloads    json.RawMessage `json:"downloads"`
+			Extras          []Extra         `json:"extras"`
+		} `json:"dlcs"`
 	}
-	if err := json.Unmarshal(data, &tmp); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+
 	// Copy basic fields
-	*gd = Game(tmp.Alias)
+	gd.Title = raw.Title
+	gd.BackgroundImage = raw.BackgroundImage
+	gd.Extras = raw.Extras
 
-	// Process RawDownloads for Game.
-	gd.Downloads = parseRawDownloads(tmp.RawDownloads)
+	// Process RawDownloads for Game - handle different formats
+	gd.Downloads = parseRawDownloadsFlexible(raw.RawDownloads)
 
-	// Process DLC downloads.
-	for i, dlc := range gd.DLCs {
-		parsedDLCDownloads := parseRawDownloads(dlc.Downloads)
-		gd.DLCs[i].ParsedDownloads = parsedDLCDownloads
+	// Process DLCs
+	gd.DLCs = make([]DLC, len(raw.DLCs))
+	for i, rawDLC := range raw.DLCs {
+		gd.DLCs[i] = DLC{
+			Title:           rawDLC.Title,
+			BackgroundImage: rawDLC.BackgroundImage,
+			Extras:          rawDLC.Extras,
+		}
+		gd.DLCs[i].ParsedDownloads = parseRawDownloadsFlexible(rawDLC.RawDownloads)
+	}
+
+	return nil
+}
+
+// parseRawDownloadsFlexible handles different JSON formats for downloads from GOG API.
+func parseRawDownloadsFlexible(rawJSON json.RawMessage) []Downloadable {
+	if len(rawJSON) == 0 || string(rawJSON) == "null" || string(rawJSON) == "[]" {
+		return nil
+	}
+
+	// Try format 1: [][]interface{} (expected format)
+	var arrArr [][]interface{}
+	if err := json.Unmarshal(rawJSON, &arrArr); err == nil {
+		return parseRawDownloads(arrArr)
+	}
+
+	// Try format 2: []interface{} with objects (alternative format)
+	var arr []interface{}
+	if err := json.Unmarshal(rawJSON, &arr); err == nil {
+		// Check if it's an array of objects with language/platforms keys
+		var downloads []Downloadable
+		for _, item := range arr {
+			if obj, ok := item.(map[string]interface{}); ok {
+				// Direct object format: {"language": "en", "windows": [...], ...}
+				dl := Downloadable{}
+				if lang, ok := obj["language"].(string); ok {
+					dl.Language = lang
+				}
+				// Try to parse platforms from the object
+				platformsData, _ := json.Marshal(obj)
+				var platforms Platform
+				if json.Unmarshal(platformsData, &platforms) == nil {
+					dl.Platforms = platforms
+				}
+				if dl.Language != "" || len(dl.Platforms.Windows) > 0 || len(dl.Platforms.Mac) > 0 || len(dl.Platforms.Linux) > 0 {
+					downloads = append(downloads, dl)
+				}
+			} else if tuple, ok := item.([]interface{}); ok {
+				// Tuple format: [language, platforms]
+				if len(tuple) == 2 {
+					if lang, ok := tuple[0].(string); ok {
+						if platforms, err := parsePlatforms(tuple[1]); err == nil {
+							downloads = append(downloads, Downloadable{
+								Language:  lang,
+								Platforms: platforms,
+							})
+						}
+					}
+				}
+			}
+		}
+		return downloads
 	}
 
 	return nil

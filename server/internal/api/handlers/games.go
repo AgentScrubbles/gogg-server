@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -12,6 +13,19 @@ import (
 	"github.com/habedi/gogg/server/internal/repository"
 	"github.com/rs/zerolog/log"
 )
+
+// fixImageURL ensures GOG image URLs have a proper protocol.
+// GOG often returns protocol-relative URLs starting with //.
+func fixImageURL(url *string) *string {
+	if url == nil {
+		return nil
+	}
+	if strings.HasPrefix(*url, "//") {
+		fixed := "https:" + *url
+		return &fixed
+	}
+	return url
+}
 
 // GameResponse wraps a game with parsed metadata.
 type GameResponse struct {
@@ -59,7 +73,8 @@ func (h *Handler) ListGames(w http.ResponseWriter, r *http.Request) {
 		// Parse the JSON data to extract useful fields for listing
 		var gameData client.Game
 		if err := json.Unmarshal([]byte(g.Data), &gameData); err == nil {
-			item["background_image"] = gameData.BackgroundImage
+			// Fix protocol-relative URLs from GOG (they start with //)
+			item["background_image"] = fixImageURL(gameData.BackgroundImage)
 			item["has_dlc"] = len(gameData.DLCs) > 0
 			item["has_extras"] = len(gameData.Extras) > 0
 
@@ -131,7 +146,8 @@ func (h *Handler) SearchGames(w http.ResponseWriter, r *http.Request) {
 
 		var gameData client.Game
 		if err := json.Unmarshal([]byte(g.Data), &gameData); err == nil {
-			item["background_image"] = gameData.BackgroundImage
+			// Fix protocol-relative URLs from GOG
+			item["background_image"] = fixImageURL(gameData.BackgroundImage)
 			item["has_dlc"] = len(gameData.DLCs) > 0
 			item["has_extras"] = len(gameData.Extras) > 0
 
@@ -193,6 +209,12 @@ func (h *Handler) GetGame(w http.ResponseWriter, r *http.Request) {
 		log.Error().Err(err).Int("game_id", gameID).Msg("Failed to parse game data")
 		respondError(w, http.StatusInternalServerError, "internal_error", "Failed to parse game data")
 		return
+	}
+
+	// Fix protocol-relative URLs from GOG
+	gameData.BackgroundImage = fixImageURL(gameData.BackgroundImage)
+	for i := range gameData.DLCs {
+		gameData.DLCs[i].BackgroundImage = fixImageURL(gameData.DLCs[i].BackgroundImage)
 	}
 
 	response := GameResponse{
