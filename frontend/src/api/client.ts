@@ -23,13 +23,17 @@ async function request<T>(
 ): Promise<T> {
   const token = localStorage.getItem('token');
 
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...options.headers,
   };
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // Merge any additional headers from options
+  if (options.headers) {
+    Object.assign(headers, options.headers);
   }
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
