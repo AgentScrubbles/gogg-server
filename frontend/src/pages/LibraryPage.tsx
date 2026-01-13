@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Search, RefreshCw, Monitor, Apple, Terminal } from 'lucide-react';
+import { Search, RefreshCw, Monitor, Apple, Terminal, CheckCircle } from 'lucide-react';
 import { getGames, searchGames, refreshCatalogue } from '../api/client';
 import type { Game } from '../types';
 
@@ -163,6 +163,12 @@ function GameCard({ game }: { game: Game }) {
             No Image
           </div>
         )}
+        {/* Downloaded Badge */}
+        {game.is_downloaded && (
+          <div className="absolute top-2 right-2" title="Downloaded">
+            <CheckCircle size={20} className="text-green-400 drop-shadow-lg" fill="rgba(0,0,0,0.5)" />
+          </div>
+        )}
         {/* Platform Icons */}
         <div className="absolute bottom-2 left-2 flex gap-1">
           {game.platforms.windows && (
@@ -188,6 +194,11 @@ function GameCard({ game }: { game: Game }) {
           {game.title}
         </h3>
         <div className="flex gap-2 mt-1">
+          {game.is_downloaded && (
+            <span className="text-xs px-1.5 py-0.5 bg-green-900/50 text-green-300 rounded">
+              Downloaded
+            </span>
+          )}
           {game.has_dlc && (
             <span className="text-xs px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded">DLC</span>
           )}

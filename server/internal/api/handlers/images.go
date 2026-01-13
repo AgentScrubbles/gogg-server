@@ -28,9 +28,10 @@ var (
 	}
 
 	// Image format suffixes
+	// cover uses _bg_crop_480x655 to create portrait crops from backgrounds
 	imageFormats = map[string]string{
 		"background": ".jpg",
-		"cover":      "_product_card_v2_mobile_slider_639.jpg",
+		"cover":      "_bg_crop_480x655.jpg",
 		"logo":       "_glx_logo.jpg",
 	}
 )
@@ -105,8 +106,8 @@ func (h *Handler) GetImage(w http.ResponseWriter, r *http.Request) {
 func fetchFromGOG(hash, suffix string) ([]byte, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	// For formatted images (cover, logo), use images.gog.com
-	if suffix != ".jpg" {
+	// Logo images use images.gog.com (not the CDN hosts)
+	if strings.HasPrefix(suffix, "_glx_logo") {
 		url := fmt.Sprintf("https://images.gog.com/%s%s", hash, suffix)
 		resp, err := client.Get(url)
 		if err != nil {
@@ -120,7 +121,7 @@ func fetchFromGOG(hash, suffix string) ([]byte, error) {
 		return nil, fmt.Errorf("image not found: %d", resp.StatusCode)
 	}
 
-	// For raw background images, try each CDN host
+	// Background images and crop transformations use CDN hosts
 	for _, host := range gogCDNHosts {
 		url := fmt.Sprintf("https://%s/%s%s", host, hash, suffix)
 

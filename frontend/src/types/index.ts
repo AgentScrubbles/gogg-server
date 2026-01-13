@@ -14,6 +14,7 @@ export interface Game {
   background_image?: string;
   has_dlc: boolean;
   has_extras: boolean;
+  is_downloaded: boolean;
   platforms: {
     windows?: boolean;
     mac?: boolean;

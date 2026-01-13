@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -50,6 +52,21 @@ func backgroundImageURL(url *string) *string {
 	return &proxyURL
 }
 
+// isGameDownloaded checks if a game has been downloaded by looking for its folder.
+// Games are downloaded to {downloadPath}/{sanitizedTitle}/ with a metadata.json file.
+func isGameDownloaded(downloadPath, title string) bool {
+	if downloadPath == "" || title == "" {
+		return false
+	}
+	sanitizedTitle := client.SanitizePath(title)
+	if sanitizedTitle == "" {
+		return false
+	}
+	metadataPath := filepath.Join(downloadPath, sanitizedTitle, "metadata.json")
+	_, err := os.Stat(metadataPath)
+	return err == nil
+}
+
 // GameResponse wraps a game with parsed metadata.
 type GameResponse struct {
 	ID        uint        `json:"id"`
@@ -86,11 +103,12 @@ func (h *Handler) ListGames(w http.ResponseWriter, r *http.Request) {
 	var response []map[string]interface{}
 	for _, g := range games {
 		item := map[string]interface{}{
-			"id":         g.ID,
-			"game_id":    g.GameID,
-			"title":      g.Title,
-			"created_at": g.CreatedAt,
-			"updated_at": g.UpdatedAt,
+			"id":            g.ID,
+			"game_id":       g.GameID,
+			"title":         g.Title,
+			"is_downloaded": isGameDownloaded(h.config.DownloadPath, g.Title),
+			"created_at":    g.CreatedAt,
+			"updated_at":    g.UpdatedAt,
 		}
 
 		// Parse the JSON data to extract useful fields for listing
@@ -161,11 +179,12 @@ func (h *Handler) SearchGames(w http.ResponseWriter, r *http.Request) {
 	var response []map[string]interface{}
 	for _, g := range games {
 		item := map[string]interface{}{
-			"id":         g.ID,
-			"game_id":    g.GameID,
-			"title":      g.Title,
-			"created_at": g.CreatedAt,
-			"updated_at": g.UpdatedAt,
+			"id":            g.ID,
+			"game_id":       g.GameID,
+			"title":         g.Title,
+			"is_downloaded": isGameDownloaded(h.config.DownloadPath, g.Title),
+			"created_at":    g.CreatedAt,
+			"updated_at":    g.UpdatedAt,
 		}
 
 		var gameData client.Game
