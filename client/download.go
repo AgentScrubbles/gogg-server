@@ -49,6 +49,7 @@ type progressReader struct {
 	totalSize  int64
 	bytesRead  int64
 	updateLock sync.Mutex
+	lastUpdate time.Time
 }
 
 func (pr *progressReader) writeProgress(data []byte) {
@@ -63,19 +64,26 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 		pr.updateLock.Lock()
 		pr.bytesRead += int64(n)
 		currentBytes := pr.bytesRead
+		shouldUpdate := time.Since(pr.lastUpdate) >= 250*time.Millisecond
+		if shouldUpdate {
+			pr.lastUpdate = time.Now()
+		}
 		pr.updateLock.Unlock()
 
-		update := ProgressUpdate{
-			Type:         "file_progress",
-			FileName:     pr.fileName,
-			CurrentBytes: currentBytes,
-			TotalBytes:   pr.totalSize,
-		}
-		jsonUpdate, jsonErr := json.Marshal(update)
-		if jsonErr != nil {
-			log.Error().Err(jsonErr).Msg("Failed to marshal progress update")
-		} else {
-			pr.writeProgress(append(jsonUpdate, '\n'))
+		// Throttle progress updates to avoid excessive memory usage
+		if shouldUpdate {
+			update := ProgressUpdate{
+				Type:         "file_progress",
+				FileName:     pr.fileName,
+				CurrentBytes: currentBytes,
+				TotalBytes:   pr.totalSize,
+			}
+			jsonUpdate, jsonErr := json.Marshal(update)
+			if jsonErr != nil {
+				log.Error().Err(jsonErr).Msg("Failed to marshal progress update")
+			} else {
+				pr.writeProgress(append(jsonUpdate, '\n'))
+			}
 		}
 	}
 	return n, err

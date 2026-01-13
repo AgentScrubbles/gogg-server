@@ -30,7 +30,7 @@ var (
 	// Image format suffixes
 	imageFormats = map[string]string{
 		"background": ".jpg",
-		"cover":      "_product_tile_256.jpg",
+		"cover":      "_product_card_v2_mobile_slider_639.jpg",
 		"logo":       "_glx_logo.jpg",
 	}
 )
