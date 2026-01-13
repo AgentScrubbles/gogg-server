@@ -72,7 +72,7 @@ func TestExchangeCodeForToken_Success(t *testing.T) {
 
 	gogClient := &GogClient{TokenURL: server.URL + "/token"}
 
-	accessToken, refreshToken, expiresAt, err := gogClient.exchangeCodeForToken("my-auth-code")
+	accessToken, refreshToken, expiresAt, err := gogClient.ExchangeCodeForToken("my-auth-code")
 
 	require.NoError(t, err)
 	assert.Equal(t, "access-from-code", accessToken)

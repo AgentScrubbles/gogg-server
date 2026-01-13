@@ -197,10 +197,23 @@ func closeResponseBody(resp *http.Response) {
 }
 
 func parseGameData(body []byte, game *Game) error {
-	if err := json.Unmarshal(body, game); err != nil {
-		log.Error().Err(err).Msg("Failed to parse game data")
+	// Try to unmarshal as a single object first
+	if err := json.Unmarshal(body, game); err == nil {
+		return nil
+	}
+
+	// Some GOG responses return an array with a single game object
+	var games []Game
+	if err := json.Unmarshal(body, &games); err != nil {
+		log.Error().Err(err).Msg("Failed to parse game data as object or array")
 		return err
 	}
+
+	if len(games) == 0 {
+		return fmt.Errorf("empty game array response")
+	}
+
+	*game = games[0]
 	return nil
 }
 

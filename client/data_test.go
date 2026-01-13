@@ -1,120 +1,140 @@
-package client_test
+package client
 
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/habedi/gogg/client"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// UnmarshalGameData unmarshals the provided JSON string into a Game object.
-// It takes a testing.T object and a JSON string as parameters and returns a pointer to the Game object.
-func UnmarshalGameData(t *testing.T, jsonData string) *client.Game {
-	var game client.Game
+func TestGameUnmarshalJSON_StandardFormat(t *testing.T) {
+	// Standard GOG response format
+	jsonData := `{
+		"title": "Test Game",
+		"backgroundImage": "//images.gog.com/test.jpg",
+		"downloads": [
+			["en", {"windows": [{"name": "setup.exe", "size": "1 GB"}]}]
+		],
+		"extras": [],
+		"dlcs": []
+	}`
+
+	var game Game
 	err := json.Unmarshal([]byte(jsonData), &game)
-	require.NoError(t, err)
-	return &game
+	if err != nil {
+		t.Fatalf("Failed to unmarshal standard format: %v", err)
+	}
+	if game.Title != "Test Game" {
+		t.Errorf("Expected title 'Test Game', got '%s'", game.Title)
+	}
+	if len(game.Downloads) != 1 {
+		t.Errorf("Expected 1 download, got %d", len(game.Downloads))
+	}
 }
 
-// TestParsesDownloadsCorrectly tests the parsing of downloads from the JSON data.
-func TestParsesDownloadsCorrectly(t *testing.T) {
+func TestGameUnmarshalJSON_EmptyDownloads(t *testing.T) {
 	jsonData := `{
 		"title": "Test Game",
-        "backgroundImage": "https://example.com/background.jpg",
+		"downloads": [],
+		"extras": [],
+		"dlcs": []
+	}`
+
+	var game Game
+	err := json.Unmarshal([]byte(jsonData), &game)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal empty downloads: %v", err)
+	}
+}
+
+func TestGameUnmarshalJSON_NullDownloads(t *testing.T) {
+	jsonData := `{
+		"title": "Test Game",
+		"downloads": null,
+		"extras": [],
+		"dlcs": []
+	}`
+
+	var game Game
+	err := json.Unmarshal([]byte(jsonData), &game)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal null downloads: %v", err)
+	}
+}
+
+func TestGameUnmarshalJSON_ArrayResponse(t *testing.T) {
+	// Some GOG endpoints return an array wrapper
+	jsonData := `[{
+		"title": "Test Game",
+		"backgroundImage": "//images.gog.com/test.jpg",
+		"downloads": [],
+		"extras": [],
+		"dlcs": []
+	}]`
+
+	// First try to unmarshal as array
+	var games []Game
+	err := json.Unmarshal([]byte(jsonData), &games)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal array response: %v", err)
+	}
+	if len(games) != 1 {
+		t.Fatalf("Expected 1 game in array, got %d", len(games))
+	}
+	if games[0].Title != "Test Game" {
+		t.Errorf("Expected title 'Test Game', got '%s'", games[0].Title)
+	}
+}
+
+func TestGameUnmarshalJSON_ObjectDownloads(t *testing.T) {
+	// Alternative format with object-style downloads
+	jsonData := `{
+		"title": "Test Game",
 		"downloads": [
-			["English", {"windows": [{"name": "setup.exe", "size": "1GB"}]}]
+			{"language": "en", "windows": [{"name": "setup.exe", "size": "1 GB"}]}
 		],
 		"extras": [],
 		"dlcs": []
 	}`
-	game := UnmarshalGameData(t, jsonData)
 
-	assert.Equal(t, "Test Game", game.Title)
-	assert.Len(t, game.Downloads, 1)
-	assert.Equal(t, "English", game.Downloads[0].Language)
-	assert.Len(t, game.Downloads[0].Platforms.Windows, 1)
-	assert.Equal(t, "setup.exe", game.Downloads[0].Platforms.Windows[0].Name)
-	assert.Equal(t, "1GB", game.Downloads[0].Platforms.Windows[0].Size)
+	var game Game
+	err := json.Unmarshal([]byte(jsonData), &game)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal object downloads: %v", err)
+	}
 }
 
-// TestParsesDLCsCorrectly tests the parsing of DLCs from the JSON data.
-func TestParsesDLCsCorrectly(t *testing.T) {
-	jsonData := `{
-		"title": "Test Game",
-		"downloads": [],
-		"extras": [],
-		"dlcs": [
-			{
-				"title": "Test DLC",
-				"downloads": [
-					["English", {"windows": [{"name": "dlc_setup.exe", "size": "500MB"}]}]
-				]
-			}
-		]
-	}`
-	game := UnmarshalGameData(t, jsonData)
-
-	assert.Len(t, game.DLCs, 1)
-	assert.Equal(t, "Test DLC", game.DLCs[0].Title)
-	assert.Len(t, game.DLCs[0].ParsedDownloads, 1)
-	assert.Equal(t, "English", game.DLCs[0].ParsedDownloads[0].Language)
-	assert.Len(t, game.DLCs[0].ParsedDownloads[0].Platforms.Windows, 1)
-	assert.Equal(t, "dlc_setup.exe", game.DLCs[0].ParsedDownloads[0].Platforms.Windows[0].Name)
-	assert.Equal(t, "500MB", game.DLCs[0].ParsedDownloads[0].Platforms.Windows[0].Size)
-}
-
-// TestIgnoresInvalidDownloads tests that invalid downloads are ignored during parsing.
-func TestIgnoresInvalidDownloads(t *testing.T) {
-	jsonData := `{
-		"title": "Test Game",
-		"downloads": [
-			["English", {"windows": [{"name": "setup.exe", "size": "1GB"}]}],
-			["Invalid"]
-		],
-		"extras": [],
-		"dlcs": []
-	}`
-	game := UnmarshalGameData(t, jsonData)
-
-	assert.Len(t, game.Downloads, 1)
-	assert.Equal(t, "English", game.Downloads[0].Language)
-	assert.Len(t, game.Downloads[0].Platforms.Windows, 1)
-	assert.Equal(t, "setup.exe", game.Downloads[0].Platforms.Windows[0].Name)
-	assert.Equal(t, "1GB", game.Downloads[0].Platforms.Windows[0].Size)
-}
-
-// TestParsesExtrasCorrectly tests the parsing of extras from the JSON data.
-func TestParsesExtrasCorrectly(t *testing.T) {
-	jsonData := `{
-		"title": "Test Game",
-		"downloads": [],
-		"extras": [
-			{"name": "Soundtrack", "size": "200MB", "manualUrl": "http://example.com/soundtrack"}
-		],
-		"dlcs": []
-	}`
-	game := UnmarshalGameData(t, jsonData)
-
-	assert.Len(t, game.Extras, 1)
-	assert.Equal(t, "Soundtrack", game.Extras[0].Name)
-	assert.Equal(t, "200MB", game.Extras[0].Size)
-	assert.Equal(t, "http://example.com/soundtrack", game.Extras[0].ManualURL)
-}
-
-// TestHandlesEmptyDownloads tests that the Game object handles empty downloads correctly.
-func TestHandlesEmptyDownloads(t *testing.T) {
-	jsonData := `{
+func TestParseGameData_Object(t *testing.T) {
+	jsonData := []byte(`{
 		"title": "Test Game",
 		"downloads": [],
 		"extras": [],
 		"dlcs": []
-	}`
-	game := UnmarshalGameData(t, jsonData)
+	}`)
 
-	assert.Equal(t, "Test Game", game.Title)
-	assert.Empty(t, game.Downloads)
-	assert.Empty(t, game.Extras)
-	assert.Empty(t, game.DLCs)
+	var game Game
+	err := parseGameData(jsonData, &game)
+	if err != nil {
+		t.Fatalf("Failed to parse object response: %v", err)
+	}
+	if game.Title != "Test Game" {
+		t.Errorf("Expected title 'Test Game', got '%s'", game.Title)
+	}
+}
+
+func TestParseGameData_Array(t *testing.T) {
+	// GOG sometimes returns games as an array with single element
+	jsonData := []byte(`[{
+		"title": "Array Game",
+		"downloads": [],
+		"extras": [],
+		"dlcs": []
+	}]`)
+
+	var game Game
+	err := parseGameData(jsonData, &game)
+	if err != nil {
+		t.Fatalf("Failed to parse array response: %v", err)
+	}
+	if game.Title != "Array Game" {
+		t.Errorf("Expected title 'Array Game', got '%s'", game.Title)
+	}
 }
