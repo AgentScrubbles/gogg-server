@@ -14,31 +14,40 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// fixImageURL converts GOG image URLs to our local proxy URLs.
-// GOG returns URLs like "//images-1.gog-statics.com/{hash}" which we convert
-// to "/api/images/{hash}" to serve through our caching proxy.
-func fixImageURL(url *string) *string {
+// extractImageHash extracts the hash from a GOG image URL.
+// Format: "//images-X.gog-statics.com/{hash}" -> "{hash}"
+func extractImageHash(url *string) string {
 	if url == nil {
-		return nil
+		return ""
 	}
-
-	// Extract the hash from the URL
-	// Format: "//images-X.gog-statics.com/{hash}" -> "/api/images/{hash}"
 	s := *url
 	if idx := strings.LastIndex(s, "/"); idx != -1 {
 		hash := s[idx+1:]
 		if len(hash) == 64 { // GOG hashes are 64 hex chars
-			proxyURL := "/api/images/" + hash
-			return &proxyURL
+			return hash
 		}
 	}
+	return ""
+}
 
-	// Fallback: if we can't parse it, return with https prefix
-	if strings.HasPrefix(s, "//") {
-		fixed := "https:" + s + ".jpg"
-		return &fixed
+// coverImageURL returns the proxy URL for the cover image (square tile).
+func coverImageURL(url *string) *string {
+	hash := extractImageHash(url)
+	if hash == "" {
+		return nil
 	}
-	return url
+	proxyURL := "/api/images/" + hash + "?format=cover"
+	return &proxyURL
+}
+
+// backgroundImageURL returns the proxy URL for the background image.
+func backgroundImageURL(url *string) *string {
+	hash := extractImageHash(url)
+	if hash == "" {
+		return nil
+	}
+	proxyURL := "/api/images/" + hash + "?format=background"
+	return &proxyURL
 }
 
 // GameResponse wraps a game with parsed metadata.
@@ -87,8 +96,9 @@ func (h *Handler) ListGames(w http.ResponseWriter, r *http.Request) {
 		// Parse the JSON data to extract useful fields for listing
 		var gameData client.Game
 		if err := json.Unmarshal([]byte(g.Data), &gameData); err == nil {
-			// Fix protocol-relative URLs from GOG (they start with //)
-			item["background_image"] = fixImageURL(gameData.BackgroundImage)
+			// Provide both cover (for cards) and background (for detail page) images
+			item["cover_image"] = coverImageURL(gameData.BackgroundImage)
+			item["background_image"] = backgroundImageURL(gameData.BackgroundImage)
 			item["has_dlc"] = len(gameData.DLCs) > 0
 			item["has_extras"] = len(gameData.Extras) > 0
 
@@ -160,8 +170,9 @@ func (h *Handler) SearchGames(w http.ResponseWriter, r *http.Request) {
 
 		var gameData client.Game
 		if err := json.Unmarshal([]byte(g.Data), &gameData); err == nil {
-			// Fix protocol-relative URLs from GOG
-			item["background_image"] = fixImageURL(gameData.BackgroundImage)
+			// Provide both cover (for cards) and background (for detail page) images
+			item["cover_image"] = coverImageURL(gameData.BackgroundImage)
+			item["background_image"] = backgroundImageURL(gameData.BackgroundImage)
 			item["has_dlc"] = len(gameData.DLCs) > 0
 			item["has_extras"] = len(gameData.Extras) > 0
 
@@ -225,10 +236,10 @@ func (h *Handler) GetGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fix protocol-relative URLs from GOG
-	gameData.BackgroundImage = fixImageURL(gameData.BackgroundImage)
+	// Convert to proxy URLs
+	gameData.BackgroundImage = backgroundImageURL(gameData.BackgroundImage)
 	for i := range gameData.DLCs {
-		gameData.DLCs[i].BackgroundImage = fixImageURL(gameData.DLCs[i].BackgroundImage)
+		gameData.DLCs[i].BackgroundImage = backgroundImageURL(gameData.DLCs[i].BackgroundImage)
 	}
 
 	response := GameResponse{

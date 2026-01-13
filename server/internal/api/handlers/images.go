@@ -19,16 +19,24 @@ var (
 	// validHashRegex matches GOG image hashes (64 hex characters)
 	validHashRegex = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
-	// GOG CDN hosts to try
+	// GOG CDN hosts to try for raw images
 	gogCDNHosts = []string{
 		"images-1.gog-statics.com",
 		"images-2.gog-statics.com",
 		"images-3.gog-statics.com",
 		"images-4.gog-statics.com",
 	}
+
+	// Image format suffixes
+	imageFormats = map[string]string{
+		"background": ".jpg",
+		"cover":      "_product_tile_256.jpg",
+		"logo":       "_glx_logo.jpg",
+	}
 )
 
 // GetImage serves a cached GOG image or fetches and caches it.
+// Supports ?format=cover|background|logo (default: background)
 func (h *Handler) GetImage(w http.ResponseWriter, r *http.Request) {
 	hash := chi.URLParam(r, "hash")
 
@@ -38,9 +46,21 @@ func (h *Handler) GetImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build cache path: /downloads/images/{first2chars}/{hash}.jpg
+	// Get format (default to background for backwards compatibility)
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "background"
+	}
+	suffix, ok := imageFormats[format]
+	if !ok {
+		http.Error(w, "Invalid format. Use: cover, background, or logo", http.StatusBadRequest)
+		return
+	}
+
+	// Build cache path: /downloads/images/{first2chars}/{hash}_{format}.jpg
 	cacheDir := filepath.Join(h.config.DownloadPath, "images", hash[:2])
-	cachePath := filepath.Join(cacheDir, hash+".jpg")
+	cacheFilename := hash + "_" + format + ".jpg"
+	cachePath := filepath.Join(cacheDir, cacheFilename)
 
 	// Check if cached
 	if _, err := os.Stat(cachePath); err == nil {
@@ -52,9 +72,9 @@ func (h *Handler) GetImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Not cached - fetch from GOG CDN
-	imageData, err := fetchFromGOG(hash)
+	imageData, err := fetchFromGOG(hash, suffix)
 	if err != nil {
-		log.Warn().Err(err).Str("hash", hash).Msg("Failed to fetch image from GOG")
+		log.Warn().Err(err).Str("hash", hash).Str("format", format).Msg("Failed to fetch image from GOG")
 		http.Error(w, "Image not found", http.StatusNotFound)
 		return
 	}
@@ -72,7 +92,7 @@ func (h *Handler) GetImage(w http.ResponseWriter, r *http.Request) {
 	if err := os.WriteFile(cachePath, imageData, 0644); err != nil {
 		log.Warn().Err(err).Str("path", cachePath).Msg("Failed to cache image")
 	} else {
-		log.Debug().Str("hash", hash).Msg("Cached GOG image")
+		log.Debug().Str("hash", hash).Str("format", format).Msg("Cached GOG image")
 	}
 
 	// Serve the image
@@ -82,12 +102,27 @@ func (h *Handler) GetImage(w http.ResponseWriter, r *http.Request) {
 }
 
 // fetchFromGOG tries to fetch an image from GOG's CDN.
-func fetchFromGOG(hash string) ([]byte, error) {
+func fetchFromGOG(hash, suffix string) ([]byte, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 
-	// Try each CDN host
+	// For formatted images (cover, logo), use images.gog.com
+	if suffix != ".jpg" {
+		url := fmt.Sprintf("https://images.gog.com/%s%s", hash, suffix)
+		resp, err := client.Get(url)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			return io.ReadAll(resp.Body)
+		}
+		return nil, fmt.Errorf("image not found: %d", resp.StatusCode)
+	}
+
+	// For raw background images, try each CDN host
 	for _, host := range gogCDNHosts {
-		url := fmt.Sprintf("https://%s/%s.jpg", host, hash)
+		url := fmt.Sprintf("https://%s/%s%s", host, hash, suffix)
 
 		resp, err := client.Get(url)
 		if err != nil {

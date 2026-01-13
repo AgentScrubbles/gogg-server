@@ -10,6 +10,7 @@ export interface Game {
   id: number;
   game_id: number;
   title: string;
+  cover_image?: string;
   background_image?: string;
   has_dlc: boolean;
   has_extras: boolean;

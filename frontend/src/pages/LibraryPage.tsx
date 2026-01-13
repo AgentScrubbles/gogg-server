@@ -151,9 +151,9 @@ function GameCard({ game }: { game: Game }) {
     >
       {/* Cover Image */}
       <div className="aspect-[3/4] bg-gray-700 relative">
-        {game.background_image ? (
+        {game.cover_image ? (
           <img
-            src={game.background_image}
+            src={game.cover_image}
             alt={game.title}
             className="w-full h-full object-cover"
             loading="lazy"
