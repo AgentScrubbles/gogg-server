@@ -62,11 +62,33 @@ export default function LoginPage() {
     }
   };
 
+  // Extract code from URL or return as-is if it's just the code
+  const extractCode = (input: string): string => {
+    const trimmed = input.trim();
+
+    // Check if it looks like a URL
+    if (trimmed.includes('code=')) {
+      try {
+        const url = new URL(trimmed);
+        const codeParam = url.searchParams.get('code');
+        if (codeParam) return codeParam;
+      } catch {
+        // Not a valid URL, try regex fallback
+        const match = trimmed.match(/[?&]code=([^&]+)/);
+        if (match) return match[1];
+      }
+    }
+
+    // Return as-is (assume it's the raw code)
+    return trimmed;
+  };
+
   const handleCodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!code.trim()) {
-      setError('Please enter the code from the URL');
+    const extractedCode = extractCode(code);
+    if (!extractedCode) {
+      setError('Please enter the code or URL');
       return;
     }
 
@@ -74,7 +96,7 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      await login(code.trim());
+      await login(extractedCode);
       // Navigation happens automatically via isAuthenticated check
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to authenticate');
@@ -157,21 +179,18 @@ export default function LoginPage() {
           <form onSubmit={handleCodeSubmit} className="space-y-6">
             <div>
               <p className="text-gray-300 mb-4">
-                After logging in, you'll see a URL like:
+                After logging in, copy the <span className="text-purple-400 font-medium">entire URL</span> from your browser and paste it below:
               </p>
               <div className="p-3 bg-gray-900 rounded-lg text-xs text-gray-400 font-mono break-all mb-4">
-                https://embed.gog.com/on_login_success?...&code=<span className="text-purple-400">abc123...</span>
+                https://embed.gog.com/on_login_success?...&code=abc123...
               </div>
-              <p className="text-gray-300 mb-4">
-                Copy the <span className="text-purple-400 font-medium">code</span> value from the URL and paste it below:
-              </p>
             </div>
 
             <input
               type="text"
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              placeholder="Paste the code here"
+              placeholder="Paste the URL or code here"
               className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
               autoFocus
             />

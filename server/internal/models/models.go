@@ -32,19 +32,14 @@ type UserToken struct {
 // UserGame stores a game in a user's catalogue.
 type UserGame struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	UserID    uint      `gorm:"index;not null" json:"user_id"`
-	GameID    int       `gorm:"index;not null" json:"game_id"`
+	UserID    uint      `gorm:"uniqueIndex:idx_user_game;not null" json:"user_id"`
+	GameID    int       `gorm:"uniqueIndex:idx_user_game;not null" json:"game_id"`
 	Title     string    `gorm:"index;size:500" json:"title"`
 	Data      string    `gorm:"type:text" json:"data"` // JSON blob of full game metadata
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
 	User User `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE" json:"-"`
-}
-
-// TableName sets a unique constraint on user_id + game_id.
-func (UserGame) TableName() string {
-	return "user_games"
 }
 
 // DownloadStatus represents the state of a download job.
