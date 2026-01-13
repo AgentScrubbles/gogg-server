@@ -219,6 +219,7 @@ func (w *Worker) processJob(job *models.DownloadJob) {
 		jobID:        job.ID,
 		userID:       job.UserID,
 		downloadRepo: w.downloadRepo,
+		fileProgress: make(map[string]int64),
 	}
 
 	// Execute download
@@ -289,6 +290,10 @@ type wsProgressWriter struct {
 	totalBytes   int64
 	buffer       bytes.Buffer
 	lastUpdate   time.Time
+
+	// Track per-file progress to compute aggregate
+	fileProgress   map[string]int64
+	fileProgressMu sync.Mutex
 }
 
 func (w *wsProgressWriter) Write(p []byte) (n int, err error) {
@@ -316,14 +321,23 @@ func (w *wsProgressWriter) Write(p []byte) (n int, err error) {
 		if update.Type == "start" {
 			w.totalBytes = update.OverallTotalBytes
 		} else if update.Type == "file_progress" {
+			// Track per-file progress and compute aggregate
+			w.fileProgressMu.Lock()
+			w.fileProgress[update.FileName] = update.CurrentBytes
+			var aggregateBytes int64
+			for _, bytes := range w.fileProgress {
+				aggregateBytes += bytes
+			}
+			w.fileProgressMu.Unlock()
+
 			// Throttle database updates
 			if time.Since(w.lastUpdate) > time.Second {
-				w.downloadRepo.UpdateProgress(context.Background(), w.jobID, update.CurrentBytes)
+				w.downloadRepo.UpdateProgress(context.Background(), w.jobID, aggregateBytes)
 				w.lastUpdate = time.Now()
 			}
 
-			// Broadcast to WebSocket
-			handlers.BroadcastProgress(w.userID, w.jobID, update.CurrentBytes, w.totalBytes, models.DownloadStatusDownloading)
+			// Broadcast aggregate progress to WebSocket
+			handlers.BroadcastProgress(w.userID, w.jobID, aggregateBytes, w.totalBytes, models.DownloadStatusDownloading)
 		}
 	}
 

@@ -70,7 +70,8 @@ func (s *Server) setupMiddleware() {
 	s.router.Use(middleware.RealIP)
 	s.router.Use(middleware.Logger)
 	s.router.Use(middleware.Recoverer)
-	s.router.Use(middleware.Timeout(60 * time.Second))
+	// Note: Timeout middleware is applied selectively in setupRoutes()
+	// to exclude health checks from timeout constraints
 
 	// CORS configuration
 	s.router.Use(cors.Handler(cors.Options{
@@ -86,14 +87,16 @@ func (s *Server) setupMiddleware() {
 func (s *Server) setupRoutes() {
 	r := s.router
 
-	// Health check
+	// Health check - intentionally outside timeout middleware
+	// to ensure k8s probes always get a response even under heavy load
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
 
-	// API routes
+	// API routes with timeout middleware
 	r.Route("/api", func(r chi.Router) {
+		r.Use(middleware.Timeout(60 * time.Second))
 		// Public routes
 		r.Route("/auth", func(r chi.Router) {
 			r.Get("/login-url", s.handler.GetLoginURL)
