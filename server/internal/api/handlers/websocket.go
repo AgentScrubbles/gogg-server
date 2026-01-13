@@ -27,29 +27,48 @@ type WSMessage struct {
 	Data interface{} `json:"data"`
 }
 
+// safeConn wraps a websocket.Conn with a mutex to prevent concurrent writes.
+// gorilla/websocket does not support concurrent writers, so all writes must be serialized.
+type safeConn struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (sc *safeConn) WriteMessage(messageType int, data []byte) error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.conn.WriteMessage(messageType, data)
+}
+
+func (sc *safeConn) WriteJSON(v interface{}) error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.conn.WriteJSON(v)
+}
+
 // ProgressHub manages WebSocket connections for progress updates.
 type ProgressHub struct {
 	mu          sync.RWMutex
-	connections map[uint]map[*websocket.Conn]bool // userID -> connections
+	connections map[uint]map[*safeConn]bool // userID -> connections
 }
 
 var progressHub = &ProgressHub{
-	connections: make(map[uint]map[*websocket.Conn]bool),
+	connections: make(map[uint]map[*safeConn]bool),
 }
 
 // AddConnection registers a WebSocket connection for a user.
-func (hub *ProgressHub) AddConnection(userID uint, conn *websocket.Conn) {
+func (hub *ProgressHub) AddConnection(userID uint, conn *safeConn) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 
 	if hub.connections[userID] == nil {
-		hub.connections[userID] = make(map[*websocket.Conn]bool)
+		hub.connections[userID] = make(map[*safeConn]bool)
 	}
 	hub.connections[userID][conn] = true
 }
 
 // RemoveConnection unregisters a WebSocket connection.
-func (hub *ProgressHub) RemoveConnection(userID uint, conn *websocket.Conn) {
+func (hub *ProgressHub) RemoveConnection(userID uint, conn *safeConn) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 
@@ -64,10 +83,14 @@ func (hub *ProgressHub) RemoveConnection(userID uint, conn *websocket.Conn) {
 // BroadcastToUser sends a message to all connections for a user.
 func (hub *ProgressHub) BroadcastToUser(userID uint, msg WSMessage) {
 	hub.mu.RLock()
-	conns := hub.connections[userID]
+	// Copy the connections slice to avoid holding the lock during writes
+	conns := make([]*safeConn, 0, len(hub.connections[userID]))
+	for conn := range hub.connections[userID] {
+		conns = append(conns, conn)
+	}
 	hub.mu.RUnlock()
 
-	if conns == nil {
+	if len(conns) == 0 {
 		return
 	}
 
@@ -77,7 +100,7 @@ func (hub *ProgressHub) BroadcastToUser(userID uint, msg WSMessage) {
 		return
 	}
 
-	for conn := range conns {
+	for _, conn := range conns {
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 			log.Debug().Err(err).Msg("Failed to write to WebSocket")
 			// Connection will be cleaned up by the read loop
@@ -107,12 +130,15 @@ func (h *Handler) DownloadProgressWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Upgrade to WebSocket
-	conn, err := upgrader.Upgrade(w, r, nil)
+	rawConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to upgrade WebSocket connection")
 		return
 	}
-	defer conn.Close()
+	defer rawConn.Close()
+
+	// Wrap in safeConn for thread-safe writes
+	conn := &safeConn{conn: rawConn}
 
 	// Register connection
 	progressHub.AddConnection(claims.UserID, conn)
@@ -124,9 +150,9 @@ func (h *Handler) DownloadProgressWS(w http.ResponseWriter, r *http.Request) {
 	h.sendActiveDownloads(claims.UserID, conn)
 
 	// Set up ping/pong for connection health
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	rawConn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	rawConn.SetPongHandler(func(string) error {
+		rawConn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
 
@@ -139,7 +165,7 @@ func (h *Handler) DownloadProgressWS(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer close(done)
 		for {
-			_, _, err := conn.ReadMessage()
+			_, _, err := rawConn.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 					log.Debug().Err(err).Msg("WebSocket read error")
@@ -161,7 +187,7 @@ func (h *Handler) DownloadProgressWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) sendActiveDownloads(userID uint, conn *websocket.Conn) {
+func (h *Handler) sendActiveDownloads(userID uint, conn *safeConn) {
 	// Get active downloads for this user
 	activeStatus := models.DownloadStatusDownloading
 	jobs, _, err := h.downloadRepo.ListForUser(context.Background(), userID, &activeStatus, 100, 0)
