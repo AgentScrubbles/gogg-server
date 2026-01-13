@@ -220,6 +220,7 @@ func (w *Worker) processJob(job *models.DownloadJob) {
 		userID:       job.UserID,
 		downloadRepo: w.downloadRepo,
 		fileProgress: make(map[string]int64),
+		fileTotals:   make(map[string]int64),
 	}
 
 	// Execute download
@@ -293,7 +294,11 @@ type wsProgressWriter struct {
 
 	// Track per-file progress to compute aggregate
 	fileProgress   map[string]int64
+	fileTotals     map[string]int64 // Track file totals to detect completion
 	fileProgressMu sync.Mutex
+
+	// Track completed files' bytes to maintain accurate aggregate after cleanup
+	completedBytes int64
 }
 
 func (w *wsProgressWriter) Write(p []byte) (n int, err error) {
@@ -304,8 +309,10 @@ func (w *wsProgressWriter) Write(p []byte) (n int, err error) {
 	for {
 		line, err := w.buffer.ReadBytes('\n')
 		if err == io.EOF {
-			// Incomplete line, put it back
-			w.buffer.Write(line)
+			// Incomplete line, put it back only if non-empty
+			if len(line) > 0 {
+				w.buffer.Write(line)
+			}
 			break
 		}
 		if err != nil {
@@ -324,9 +331,22 @@ func (w *wsProgressWriter) Write(p []byte) (n int, err error) {
 			// Track per-file progress and compute aggregate
 			w.fileProgressMu.Lock()
 			w.fileProgress[update.FileName] = update.CurrentBytes
-			var aggregateBytes int64
-			for _, bytes := range w.fileProgress {
-				aggregateBytes += bytes
+			if update.TotalBytes > 0 {
+				w.fileTotals[update.FileName] = update.TotalBytes
+			}
+
+			// Check if this file is complete and clean it up to prevent map growth
+			if update.TotalBytes > 0 && update.CurrentBytes >= update.TotalBytes {
+				// File complete - add to completedBytes and remove from tracking maps
+				w.completedBytes += update.CurrentBytes
+				delete(w.fileProgress, update.FileName)
+				delete(w.fileTotals, update.FileName)
+			}
+
+			// Calculate aggregate: completed files + in-progress files
+			aggregateBytes := w.completedBytes
+			for _, fileBytes := range w.fileProgress {
+				aggregateBytes += fileBytes
 			}
 			w.fileProgressMu.Unlock()
 
@@ -339,6 +359,15 @@ func (w *wsProgressWriter) Write(p []byte) (n int, err error) {
 			// Broadcast aggregate progress to WebSocket
 			handlers.BroadcastProgress(w.userID, w.jobID, aggregateBytes, w.totalBytes, models.DownloadStatusDownloading)
 		}
+	}
+
+	// Compact buffer if it has excessive capacity relative to content
+	// This prevents memory accumulation from the bytes.Buffer never shrinking
+	if w.buffer.Cap() > 64*1024 && w.buffer.Len() < 4*1024 {
+		remaining := make([]byte, w.buffer.Len())
+		copy(remaining, w.buffer.Bytes())
+		w.buffer = bytes.Buffer{}
+		w.buffer.Write(remaining)
 	}
 
 	return n, nil

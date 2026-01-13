@@ -165,6 +165,16 @@ type downloadTask struct {
 	flatten  bool
 }
 
+// drainAndClose drains up to 64KB from the response body before closing.
+// This allows the underlying TCP connection to be reused by the connection pool.
+func drainAndClose(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+	_ = resp.Body.Close()
+}
+
 func DownloadGameFiles(
 	ctx context.Context,
 	accessToken string, game Game, downloadPath string,
@@ -174,6 +184,7 @@ func DownloadGameFiles(
 ) error {
 	// This transport is configured for large file downloads. It has connection
 	// timeouts but no total timeout, preventing failures on slow networks.
+	// Memory-conscious settings prevent connection accumulation.
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
@@ -181,7 +192,15 @@ func DownloadGameFiles(
 		}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		MaxConnsPerHost:       20,
+		IdleConnTimeout:       90 * time.Second,
+		DisableCompression:    true, // GOG files are already compressed; avoid double buffering
 	}
+	// Ensure idle connections are cleaned up when download completes
+	defer transport.CloseIdleConnections()
+
 	client := &http.Client{Transport: transport}
 	clientNoRedirect := &http.Client{
 		Transport: transport,
@@ -223,7 +242,7 @@ func DownloadGameFiles(
 			}
 			return "", err
 		}
-		defer func() { _ = resp.Body.Close() }()
+		defer drainAndClose(resp)
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			if location := resp.Header.Get("Location"); location != "" {
 				return location, nil
@@ -321,7 +340,7 @@ func DownloadGameFiles(
 		if err != nil {
 			return err
 		}
-		_ = headResp.Body.Close()
+		drainAndClose(headResp)
 
 		totalSize := headResp.ContentLength
 		if task.resume && totalSize > 0 && startOffset >= totalSize {
@@ -362,7 +381,8 @@ func DownloadGameFiles(
 			if err != nil {
 				return err
 			}
-			defer func() { _ = file.Close() }()
+			// Note: The defer at line 331 captures `file` by reference,
+			// so it will close this new file handle when the function exits.
 			startOffset = 0
 		}
 		limitedBody := wrapWithGlobalRateLimiter(getResp.Body)
