@@ -14,14 +14,28 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// fixImageURL ensures GOG image URLs have a proper protocol.
-// GOG often returns protocol-relative URLs starting with //.
+// fixImageURL converts GOG image URLs to our local proxy URLs.
+// GOG returns URLs like "//images-1.gog-statics.com/{hash}" which we convert
+// to "/api/images/{hash}" to serve through our caching proxy.
 func fixImageURL(url *string) *string {
 	if url == nil {
 		return nil
 	}
-	if strings.HasPrefix(*url, "//") {
-		fixed := "https:" + *url
+
+	// Extract the hash from the URL
+	// Format: "//images-X.gog-statics.com/{hash}" -> "/api/images/{hash}"
+	s := *url
+	if idx := strings.LastIndex(s, "/"); idx != -1 {
+		hash := s[idx+1:]
+		if len(hash) == 64 { // GOG hashes are 64 hex chars
+			proxyURL := "/api/images/" + hash
+			return &proxyURL
+		}
+	}
+
+	// Fallback: if we can't parse it, return with https prefix
+	if strings.HasPrefix(s, "//") {
+		fixed := "https:" + s + ".jpg"
 		return &fixed
 	}
 	return url
@@ -285,12 +299,9 @@ func (h *Handler) RefreshCatalogue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clear existing catalogue for this user
-	if err := h.gameRepo.Clear(r.Context(), claims.UserID); err != nil {
-		log.Error().Err(err).Msg("Failed to clear game catalogue")
-		respondError(w, http.StatusInternalServerError, "internal_error", "Failed to refresh catalogue")
-		return
-	}
+	// Note: We intentionally do NOT clear existing games.
+	// This preserves game metadata even if GOG removes them later (archival).
+	// The Put() method does upsert, so existing games get updated.
 
 	// Fetch details for each game (with progress tracking)
 	var successCount int32

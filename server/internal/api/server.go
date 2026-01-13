@@ -100,6 +100,9 @@ func (s *Server) setupRoutes() {
 			r.Post("/exchange", s.handler.ExchangeCode)
 		})
 
+		// Image proxy (public, cached)
+		r.Get("/images/{hash}", s.handler.GetImage)
+
 		// Protected routes (require authentication)
 		r.Group(func(r chi.Router) {
 			r.Use(s.handler.AuthMiddleware)

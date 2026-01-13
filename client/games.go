@@ -197,6 +197,13 @@ func closeResponseBody(resp *http.Response) {
 }
 
 func parseGameData(body []byte, game *Game) error {
+	// Log first 500 chars of response for debugging
+	preview := string(body)
+	if len(preview) > 500 {
+		preview = preview[:500] + "..."
+	}
+	log.Debug().Str("response_preview", preview).Msg("Parsing game data")
+
 	// Try to unmarshal as a single object first
 	if err := json.Unmarshal(body, game); err == nil {
 		return nil
@@ -205,11 +212,12 @@ func parseGameData(body []byte, game *Game) error {
 	// Some GOG responses return an array with a single game object
 	var games []Game
 	if err := json.Unmarshal(body, &games); err != nil {
-		log.Error().Err(err).Msg("Failed to parse game data as object or array")
+		log.Error().Err(err).Str("body_preview", preview).Msg("Failed to parse game data as object or array")
 		return err
 	}
 
 	if len(games) == 0 {
+		log.Warn().Str("body", string(body)).Msg("GOG returned empty array for game")
 		return fmt.Errorf("empty game array response")
 	}
 
