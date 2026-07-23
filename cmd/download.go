@@ -45,7 +45,15 @@ type cliProgressWriter struct {
 	fileProgress    map[string]struct{ current, total int64 }
 	fileBytes       map[string]int64
 	downloadedBytes int64
+	totalBytes      int64
 	mu              sync.RWMutex
+
+	// Speed/ETA tracking
+	lastUpdateTime time.Time
+	lastBytes      int64
+	speeds         []float64
+	speedStr       string
+	etaStr         string
 }
 
 func (cw *cliProgressWriter) Write(p []byte) (n int, err error) {
@@ -68,6 +76,10 @@ func (cw *cliProgressWriter) Write(p []byte) (n int, err error) {
 				cw.fileProgress = make(map[string]struct{ current, total int64 })
 				cw.fileBytes = make(map[string]int64)
 				cw.downloadedBytes = 0
+				cw.totalBytes = update.OverallTotalBytes
+				cw.lastUpdateTime = time.Now()
+				cw.lastBytes = 0
+				cw.speeds = nil
 			case "file_progress":
 				if cw.bar != nil {
 					diff := update.CurrentBytes - cw.fileBytes[update.FileName]
@@ -79,6 +91,7 @@ func (cw *cliProgressWriter) Write(p []byte) (n int, err error) {
 					if update.CurrentBytes >= update.TotalBytes && update.TotalBytes > 0 {
 						delete(cw.fileProgress, update.FileName)
 					}
+					cw.updateSpeedAndETA()
 					cw.bar.Describe(cw.getFileStatusString())
 				}
 			}
@@ -86,6 +99,43 @@ func (cw *cliProgressWriter) Write(p []byte) (n int, err error) {
 		}
 	}
 	return len(p), nil
+}
+
+// updateSpeedAndETA calculates download speed and ETA using a rolling average.
+func (cw *cliProgressWriter) updateSpeedAndETA() {
+	now := time.Now()
+	elapsed := now.Sub(cw.lastUpdateTime).Seconds()
+
+	if elapsed < 1.0 {
+		return
+	}
+
+	bytesSinceLast := cw.downloadedBytes - cw.lastBytes
+	currentSpeed := float64(bytesSinceLast) / elapsed
+
+	cw.speeds = append(cw.speeds, currentSpeed)
+	if len(cw.speeds) > 5 {
+		cw.speeds = cw.speeds[1:]
+	}
+
+	var totalSpeed float64
+	for _, s := range cw.speeds {
+		totalSpeed += s
+	}
+	avgSpeed := totalSpeed / float64(len(cw.speeds))
+
+	cw.lastUpdateTime = now
+	cw.lastBytes = cw.downloadedBytes
+
+	cw.speedStr = formatBytes(int64(avgSpeed)) + "/s"
+	remainingBytes := cw.totalBytes - cw.downloadedBytes
+	if avgSpeed > 0 && remainingBytes > 0 {
+		etaSeconds := float64(remainingBytes) / avgSpeed
+		duration := time.Duration(etaSeconds * float64(time.Second)).Truncate(time.Second)
+		cw.etaStr = "ETA: " + duration.String()
+	} else {
+		cw.etaStr = ""
+	}
 }
 
 // getFileStatusString builds a compact string of current file progresses.
@@ -101,6 +151,14 @@ func (cw *cliProgressWriter) getFileStatusString() string {
 	sort.Strings(files)
 
 	var sb strings.Builder
+	if cw.speedStr != "" {
+		sb.WriteString(cw.speedStr)
+		if cw.etaStr != "" {
+			sb.WriteString(" | ")
+			sb.WriteString(cw.etaStr)
+		}
+		sb.WriteString(" | ")
+	}
 	sb.WriteString(fmt.Sprintf("Downloading %d files: ", len(files)))
 	for i, file := range files {
 		shortName := file

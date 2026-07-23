@@ -14,6 +14,15 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function formatETA(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 function getStatusIcon(status: DownloadStatus) {
   switch (status) {
     case 'pending':
@@ -196,10 +205,20 @@ function DownloadCard({
       </div>
 
       <div className="flex items-center justify-between text-sm text-gray-400">
-        <span>
-          {formatBytes(job.progress_bytes)} / {formatBytes(job.total_bytes)}
-        </span>
-        <span>{progress.toFixed(1)}%</span>
+        <div className="flex items-center gap-3">
+          <span>
+            {formatBytes(job.progress_bytes)} / {formatBytes(job.total_bytes)}
+          </span>
+          {job.speed_bytes_per_sec != null && job.speed_bytes_per_sec > 0 && (
+            <span>{formatBytes(job.speed_bytes_per_sec)}/s</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {job.eta_seconds != null && job.eta_seconds > 0 && (
+            <span>ETA: {formatETA(job.eta_seconds)}</span>
+          )}
+          <span>{progress.toFixed(1)}%</span>
+        </div>
       </div>
 
       {/* Cancel Button */}

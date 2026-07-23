@@ -84,6 +84,8 @@ export interface DownloadJob {
   threads: number;
   progress_bytes: number;
   total_bytes: number;
+  speed_bytes_per_sec?: number;
+  eta_seconds?: number;
   error_message?: string;
   started_at?: string;
   completed_at?: string;

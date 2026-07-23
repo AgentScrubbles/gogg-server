@@ -58,9 +58,9 @@ type gormTokenRepo struct{ db *gorm.DB }
 type gormGameRepo struct{ db *gorm.DB }
 type gormDownloadJobRepo struct{ db *gorm.DB }
 
-func NewUserRepository(db *gorm.DB) UserRepository           { return &gormUserRepo{db: db} }
-func NewTokenRepository(db *gorm.DB) TokenRepository         { return &gormTokenRepo{db: db} }
-func NewGameRepository(db *gorm.DB) GameRepository           { return &gormGameRepo{db: db} }
+func NewUserRepository(db *gorm.DB) UserRepository               { return &gormUserRepo{db: db} }
+func NewTokenRepository(db *gorm.DB) TokenRepository             { return &gormTokenRepo{db: db} }
+func NewGameRepository(db *gorm.DB) GameRepository               { return &gormGameRepo{db: db} }
 func NewDownloadJobRepository(db *gorm.DB) DownloadJobRepository { return &gormDownloadJobRepo{db: db} }
 
 // --- User Repository ---

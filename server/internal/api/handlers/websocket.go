@@ -210,14 +210,16 @@ func (h *Handler) sendActiveDownloads(userID uint, conn *safeConn) {
 }
 
 // BroadcastProgress sends a progress update to all connections for a user.
-func BroadcastProgress(userID uint, jobID uint, progressBytes int64, totalBytes int64, status models.DownloadStatus) {
+func BroadcastProgress(userID uint, jobID uint, progressBytes int64, totalBytes int64, status models.DownloadStatus, speedBytesPerSec float64, etaSeconds float64) {
 	progressHub.BroadcastToUser(userID, WSMessage{
 		Type: "progress",
 		Data: map[string]interface{}{
-			"job_id":         jobID,
-			"progress_bytes": progressBytes,
-			"total_bytes":    totalBytes,
-			"status":         status,
+			"job_id":              jobID,
+			"progress_bytes":      progressBytes,
+			"total_bytes":         totalBytes,
+			"status":              status,
+			"speed_bytes_per_sec": speedBytesPerSec,
+			"eta_seconds":         etaSeconds,
 		},
 	})
 }

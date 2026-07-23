@@ -7,6 +7,8 @@ interface ProgressUpdate {
   progress_bytes: number;
   total_bytes: number;
   status: DownloadStatus;
+  speed_bytes_per_sec?: number;
+  eta_seconds?: number;
 }
 
 interface WSMessage {
@@ -38,6 +40,8 @@ export function useDownloadProgress() {
               ...job,
               progress_bytes: progress.progress_bytes,
               status: progress.status,
+              speed_bytes_per_sec: progress.speed_bytes_per_sec,
+              eta_seconds: progress.eta_seconds,
             });
           }
           return updated;

@@ -299,6 +299,61 @@ type wsProgressWriter struct {
 
 	// Track completed files' bytes to maintain accurate aggregate after cleanup
 	completedBytes int64
+
+	// Speed/ETA tracking
+	lastSpeedTime  time.Time
+	lastSpeedBytes int64
+	speeds         []float64
+}
+
+func (w *wsProgressWriter) calculateSpeedAndETA(currentBytes int64) (speedBytesPerSec float64, etaSeconds float64) {
+	now := time.Now()
+	if w.lastSpeedTime.IsZero() {
+		w.lastSpeedTime = now
+		w.lastSpeedBytes = currentBytes
+		return 0, 0
+	}
+
+	elapsed := now.Sub(w.lastSpeedTime).Seconds()
+	if elapsed < 1.0 {
+		// Return last known values from rolling average
+		if len(w.speeds) > 0 {
+			var total float64
+			for _, s := range w.speeds {
+				total += s
+			}
+			avg := total / float64(len(w.speeds))
+			remaining := w.totalBytes - currentBytes
+			if avg > 0 && remaining > 0 {
+				return avg, float64(remaining) / avg
+			}
+			return avg, 0
+		}
+		return 0, 0
+	}
+
+	bytesSinceLast := currentBytes - w.lastSpeedBytes
+	currentSpeed := float64(bytesSinceLast) / elapsed
+
+	w.speeds = append(w.speeds, currentSpeed)
+	if len(w.speeds) > 5 {
+		w.speeds = w.speeds[1:]
+	}
+
+	var totalSpeed float64
+	for _, s := range w.speeds {
+		totalSpeed += s
+	}
+	avgSpeed := totalSpeed / float64(len(w.speeds))
+
+	w.lastSpeedTime = now
+	w.lastSpeedBytes = currentBytes
+
+	remaining := w.totalBytes - currentBytes
+	if avgSpeed > 0 && remaining > 0 {
+		return avgSpeed, float64(remaining) / avgSpeed
+	}
+	return avgSpeed, 0
 }
 
 func (w *wsProgressWriter) Write(p []byte) (n int, err error) {
@@ -356,8 +411,11 @@ func (w *wsProgressWriter) Write(p []byte) (n int, err error) {
 				w.lastUpdate = time.Now()
 			}
 
+			// Calculate speed/ETA
+			speedBytesPerSec, etaSeconds := w.calculateSpeedAndETA(aggregateBytes)
+
 			// Broadcast aggregate progress to WebSocket
-			handlers.BroadcastProgress(w.userID, w.jobID, aggregateBytes, w.totalBytes, models.DownloadStatusDownloading)
+			handlers.BroadcastProgress(w.userID, w.jobID, aggregateBytes, w.totalBytes, models.DownloadStatusDownloading, speedBytesPerSec, etaSeconds)
 		}
 	}
 
