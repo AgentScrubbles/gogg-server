@@ -280,7 +280,7 @@ func executeDownload(ctx context.Context, authService *auth.Service, gameID int,
 
 	progressWriter := &cliProgressWriter{}
 
-	err = client.DownloadGameFiles(ctx, user.AccessToken, parsedGameData, downloadPath, languageFullName, platformName, extrasFlag, dlcFlag, resumeFlag, flattenFlag, skipPatchesFlag, rommLayoutFlag, numThreads, progressWriter)
+	err = client.DownloadGameFiles(ctx, client.StaticToken(user.AccessToken), parsedGameData, downloadPath, languageFullName, platformName, extrasFlag, dlcFlag, resumeFlag, flattenFlag, skipPatchesFlag, rommLayoutFlag, numThreads, progressWriter)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			fmt.Println(clierr.New(clierr.Internal, "Download cancelled or timed out", err).Message)

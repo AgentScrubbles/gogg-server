@@ -256,7 +256,7 @@ func executeDownload(authService *auth.Service, dm *DownloadManager, game db.Gam
 		}
 
 		err = client.DownloadGameFiles(
-			ctx, token.AccessToken, parsedGameData, downloadPath, language, platformName,
+			ctx, client.StaticToken(token.AccessToken), parsedGameData, downloadPath, language, platformName,
 			extrasFlag, dlcFlag, resumeFlag, flattenFlag, skipPatchesFlag, rommLayoutFlag, numThreads,
 			updater,
 		)

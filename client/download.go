@@ -20,6 +20,17 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// TokenProvider returns a valid access token, refreshing if needed.
+// Implementations should be safe for concurrent use.
+type TokenProvider func(ctx context.Context) (string, error)
+
+// StaticToken returns a TokenProvider that always returns the same token.
+func StaticToken(token string) TokenProvider {
+	return func(ctx context.Context) (string, error) {
+		return token, nil
+	}
+}
+
 // ProgressUpdate defines the structure for progress messages.
 type ProgressUpdate struct {
 	Type              string `json:"type"` // "start", "file_progress", "status"
@@ -177,7 +188,7 @@ func drainAndClose(resp *http.Response) {
 
 func DownloadGameFiles(
 	ctx context.Context,
-	accessToken string, game Game, downloadPath string,
+	tokenProvider TokenProvider, game Game, downloadPath string,
 	gameLanguage string, platformName string, extrasFlag bool, dlcFlag bool, resumeFlag bool,
 	flattenFlag bool, skipPatchesFlag bool, rommLayout bool, numThreads int,
 	updateWriter io.Writer,
@@ -230,11 +241,15 @@ func DownloadGameFiles(
 	}
 
 	findFileLocation := func(ctx context.Context, url string) (string, error) {
+		token, err := tokenProvider(ctx)
+		if err != nil {
+			return "", fmt.Errorf("failed to get access token: %w", err)
+		}
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return "", err
 		}
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 		resp, err := clientNoRedirect.Do(req)
 		if err != nil {
 			if errors.Is(ctx.Err(), context.Canceled) {
@@ -330,11 +345,16 @@ func DownloadGameFiles(
 		}
 		defer func() { _ = file.Close() }()
 
+		token, tokenErr := tokenProvider(ctx)
+		if tokenErr != nil {
+			return fmt.Errorf("failed to get access token: %w", tokenErr)
+		}
+
 		headReq, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
 		if err != nil {
 			return err
 		}
-		headReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+		headReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 
 		headResp, err := client.Do(headReq)
 		if err != nil {
@@ -355,7 +375,7 @@ func DownloadGameFiles(
 		if err != nil {
 			return err
 		}
-		getReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+		getReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 		requestedRange := int64(0)
 		if task.resume && startOffset > 0 {
 			getReq.Header.Set("Range", fmt.Sprintf("bytes=%d-", startOffset))

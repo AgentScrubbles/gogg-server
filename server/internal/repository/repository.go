@@ -48,6 +48,7 @@ type DownloadJobRepository interface {
 	UpdateStatus(ctx context.Context, id uint, status models.DownloadStatus, errorMsg string) error
 	UpdateProgress(ctx context.Context, id uint, progressBytes int64) error
 	GetPending(ctx context.Context) (*models.DownloadJob, error)
+	ResetStalled(ctx context.Context) (int64, error)
 	Cancel(ctx context.Context, userID, jobID uint) error
 }
 
@@ -265,6 +266,16 @@ func (r *gormDownloadJobRepo) GetPending(ctx context.Context) (*models.DownloadJ
 		return nil, nil
 	}
 	return &job, err
+}
+
+func (r *gormDownloadJobRepo) ResetStalled(ctx context.Context) (int64, error) {
+	result := r.db.WithContext(ctx).Model(&models.DownloadJob{}).
+		Where("status = ?", models.DownloadStatusDownloading).
+		Updates(map[string]interface{}{
+			"status":     models.DownloadStatusPending,
+			"updated_at": time.Now(),
+		})
+	return result.RowsAffected, result.Error
 }
 
 func (r *gormDownloadJobRepo) Cancel(ctx context.Context, userID, jobID uint) error {

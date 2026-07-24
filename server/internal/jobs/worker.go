@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -67,6 +68,13 @@ func NewWorker(cfg WorkerConfig) *Worker {
 // Start begins processing download jobs.
 func (w *Worker) Start() {
 	log.Info().Int("max_workers", w.maxWorkers).Msg("Starting download worker")
+
+	// Reset any jobs stuck in "downloading" from a previous crash/restart
+	if count, err := w.downloadRepo.ResetStalled(w.ctx); err != nil {
+		log.Error().Err(err).Msg("Failed to reset stalled download jobs")
+	} else if count > 0 {
+		log.Info().Int64("count", count).Msg("Reset stalled download jobs back to pending")
+	}
 
 	w.wg.Add(1)
 	go w.processLoop()
@@ -166,29 +174,35 @@ func (w *Worker) processJob(job *models.DownloadJob) {
 	job.Status = models.DownloadStatusDownloading
 	handlers.BroadcastJobUpdate(job.UserID, job)
 
-	// Get user's GOG token
-	userToken, err := w.tokenRepo.Get(w.ctx, job.UserID)
-	if err != nil {
-		w.failJob(job, "Failed to get GOG credentials")
-		return
-	}
+	// Create a token provider that refreshes the GOG token as needed
+	var tokenMu sync.Mutex
+	tokenProvider := client.TokenProvider(func(ctx context.Context) (string, error) {
+		tokenMu.Lock()
+		defer tokenMu.Unlock()
 
-	// Refresh token if needed
-	accessToken := userToken.AccessToken
-	if time.Now().Add(5 * time.Minute).After(userToken.ExpiresAt) {
+		userToken, err := w.tokenRepo.Get(ctx, job.UserID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get GOG credentials: %w", err)
+		}
+
+		if time.Now().Add(5 * time.Minute).Before(userToken.ExpiresAt) {
+			return userToken.AccessToken, nil
+		}
+
 		gogClient := &client.GogClient{TokenURL: "https://auth.gog.com/token"}
 		newAccessToken, newRefreshToken, expiresIn, err := gogClient.PerformTokenRefresh(userToken.RefreshToken)
 		if err != nil {
-			w.failJob(job, "GOG session expired. Please log in again.")
-			return
+			return "", fmt.Errorf("GOG session expired: %w", err)
 		}
 
 		userToken.AccessToken = newAccessToken
 		userToken.RefreshToken = newRefreshToken
 		userToken.ExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
-		w.tokenRepo.Upsert(w.ctx, userToken)
-		accessToken = newAccessToken
-	}
+		if err := w.tokenRepo.Upsert(ctx, userToken); err != nil {
+			log.Warn().Err(err).Msg("Failed to persist refreshed token")
+		}
+		return newAccessToken, nil
+	})
 
 	// Get game data
 	game, err := w.gameRepo.GetByID(w.ctx, job.UserID, job.GameID)
@@ -226,7 +240,7 @@ func (w *Worker) processJob(job *models.DownloadJob) {
 	// Execute download
 	err = client.DownloadGameFiles(
 		jobCtx,
-		accessToken,
+		tokenProvider,
 		gameData,
 		w.downloadPath,
 		langName,
