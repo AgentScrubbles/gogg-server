@@ -100,7 +100,7 @@ func ParseGameData(data string) (Game, error) {
 
 func ensureDirExists(path string) error {
 	err := os.MkdirAll(path, 0755)
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrExist) {
 		log.Error().Err(err).Msgf("Failed to create directory: %s", path)
 		return err
 	}
