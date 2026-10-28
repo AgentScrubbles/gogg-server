@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -263,7 +264,11 @@ func (w *Worker) processJob(job *models.DownloadJob) {
 			job.Status = models.DownloadStatusCancelled
 			handlers.BroadcastJobUpdate(job.UserID, job)
 		} else {
-			w.failJob(job, err.Error())
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "HTTP 404") {
+				errMsg += ". This usually means the game was updated on GOG. Try refreshing your catalogue and downloading again."
+			}
+			w.failJob(job, errMsg)
 		}
 		return
 	}
